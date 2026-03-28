@@ -1,0 +1,56 @@
+---
+# ─────────────────────────────────────────────────────────────
+# PersistentVolumeClaim — PostgreSQL data
+# ─────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  namespace: finvault
+  labels:
+    app: postgres
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: standard          # Change to gp3 / premium-ssd in cloud
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+# ─────────────────────────────────────────────────────────────
+# PersistentVolumeClaim — Redis data (AOF persistence)
+# ─────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-pvc
+  namespace: finvault
+  labels:
+    app: redis
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 2Gi
+
+---
+# ─────────────────────────────────────────────────────────────
+# PersistentVolumeClaim — backend logs
+# ─────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backend-logs-pvc
+  namespace: finvault
+  labels:
+    app: backend
+spec:
+  accessModes:
+    - ReadWriteMany     # Multiple pods can write logs
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 5Gi

@@ -1,0 +1,145 @@
+---
+# ─────────────────────────────────────────────────────────────
+# Nginx Ingress Deployment
+# ─────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+  namespace: finvault
+  labels:
+    app: nginx
+    tier: proxy
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nginx
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: nginx
+        tier: proxy
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: nginx
+          image: nginx:1.25-alpine
+          ports:
+            - containerPort: 80
+              name: http
+            - containerPort: 443
+              name: https
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+            - name: nginx-vhost
+              mountPath: /etc/nginx/conf.d/finvault.conf
+              subPath: finvault.conf
+          resources:
+            requests:
+              cpu:    "100m"
+              memory: "64Mi"
+            limits:
+              cpu:    "500m"
+              memory: "256Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: nginx-config
+          configMap:
+            name: nginx-main-config
+        - name: nginx-vhost
+          configMap:
+            name: nginx-vhost-config
+
+---
+# ─────────────────────────────────────────────────────────────
+# Nginx Service (LoadBalancer — exposes to internet)
+# ─────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx
+  namespace: finvault
+  labels:
+    app: nginx
+  annotations:
+    # AWS ELB annotations (uncomment for AWS EKS)
+    # service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    # service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+    # GKE annotations (uncomment for GKE)
+    # cloud.google.com/load-balancer-type: "External"
+spec:
+  selector:
+    app: nginx
+  ports:
+    - port: 80
+      targetPort: 80
+      name: http
+    - port: 443
+      targetPort: 443
+      name: https
+  type: LoadBalancer
+  # For Minikube/local: use NodePort instead
+  # type: NodePort
+
+---
+# ─────────────────────────────────────────────────────────────
+# Ingress Resource (cert-manager / Let's Encrypt ready)
+# ─────────────────────────────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: finvault-ingress
+  namespace: finvault
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "30"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+    # cert-manager (uncomment if installed)
+    # cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: nginx
+  # tls:                          # uncomment for HTTPS
+  #   - hosts:
+  #       - finvault.yourdomain.com
+  #     secretName: finvault-tls
+  rules:
+    - host: finvault.yourdomain.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 5000
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80

@@ -1,0 +1,43 @@
+version: '3.9'
+
+# Development overrides — extends docker-compose.yml
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  backend:
+    build:
+      target: builder          # Use builder stage (has devDependencies)
+    command: npm run dev       # Use nodemon for hot-reload
+    volumes:
+      - ./backend/src:/app/src # Live code mounting
+      - /app/node_modules      # Preserve container node_modules
+    environment:
+      NODE_ENV: development
+      LOG_LEVEL: debug
+    ports:
+      - "5000:5000"
+      - "9229:9229"            # Node.js debugger port
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev   # dev-specific Dockerfile
+    volumes:
+      - ./frontend/src:/app/src
+      - /app/node_modules
+    environment:
+      REACT_APP_API_URL: http://localhost:5000/api
+      REACT_APP_ENV: development
+      CHOKIDAR_USEPOLLING: "true"   # For Docker on Windows/Mac
+      WDS_SOCKET_PORT: 0
+    ports:
+      - "3000:3000"
+    command: npm start
+
+  postgres:
+    ports:
+      - "5432:5432"
+
+  redis:
+    ports:
+      - "6379:6379"

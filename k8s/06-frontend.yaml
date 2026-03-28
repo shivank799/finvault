@@ -1,0 +1,110 @@
+---
+# ─────────────────────────────────────────────────────────────
+# Frontend Deployment
+# ─────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: finvault
+  labels:
+    app: frontend
+    tier: web
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: frontend
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge:       1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: frontend
+        tier: web
+    spec:
+      terminationGracePeriodSeconds: 30
+      imagePullSecrets:
+        - name: registry-credentials
+      containers:
+        - name: frontend
+          image: ghcr.io/YOUR_ORG/finvault-frontend:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 80
+              name: http
+          resources:
+            requests:
+              cpu:    "50m"
+              memory: "64Mi"
+            limits:
+              cpu:    "200m"
+              memory: "128Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds:       15
+            timeoutSeconds:      3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds:       5
+          securityContext:
+            runAsNonRoot:             true
+            runAsUser:                101      # nginx user
+            readOnlyRootFilesystem:   false
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              add:  ["NET_BIND_SERVICE"]
+
+---
+# ─────────────────────────────────────────────────────────────
+# Frontend Service
+# ─────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: finvault
+  labels:
+    app: frontend
+spec:
+  selector:
+    app: frontend
+  ports:
+    - port: 80
+      targetPort: 80
+      name: http
+  type: ClusterIP
+
+---
+# ─────────────────────────────────────────────────────────────
+# HPA — Frontend
+# ─────────────────────────────────────────────────────────────
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: frontend-hpa
+  namespace: finvault
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: frontend
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type:               AverageUtilization
+          averageUtilization: 70

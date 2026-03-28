@@ -1,0 +1,35 @@
+---
+# ─────────────────────────────────────────────────────────────
+# Namespace
+# ─────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: finvault
+  labels:
+    app: finvault
+    environment: production
+
+---
+# ─────────────────────────────────────────────────────────────
+# ConfigMap — non-sensitive app config
+# ─────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: finvault-config
+  namespace: finvault
+data:
+  NODE_ENV:            "production"
+  PORT:                "5000"
+  LOG_LEVEL:           "info"
+  RATE_LIMIT_WINDOW:   "15"
+  RATE_LIMIT_MAX:      "100"
+  JWT_EXPIRE:          "15m"
+  JWT_REFRESH_EXPIRE:  "7d"
+  POSTGRES_DB:         "finvault"
+  POSTGRES_USER:       "finvault_user"
+  CORS_ORIGIN:         "https://finvault.yourdomain.com"
+  FRONTEND_URL:        "https://finvault.yourdomain.com"
+  REACT_APP_ENV:       "production"
+  REACT_APP_API_URL:   "https://finvault.yourdomain.com/api"
