@@ -19,16 +19,25 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  REGISTRY:      ghcr.io
-  ORG:           ${{ github.repository_owner }}
-  IMAGE_BACKEND: ghcr.io/${{ github.repository_owner }}/finvault-backend
-  IMAGE_FRONTEND: ghcr.io/${{ github.repository_owner }}/finvault-frontend
+# Minimal, explicit permissions — principle of least privilege
+permissions:
+  contents: write          # create GitHub releases, checkout
+  packages: write          # push images to GHCR
+  security-events: write   # upload SARIF results to GitHub Security tab
+  pull-requests: read      # read PR metadata
+  id-token: write          # OIDC token for cloud auth (future-proof)
 
+env:
+  REGISTRY:       ghcr.io
+  ORG:            ${{ github.repository_owner }}
+  IMAGE_BACKEND:  ghcr.io/${{ github.repository_owner }}/finvault-backend
+  IMAGE_FRONTEND: ghcr.io/${{ github.repository_owner }}/finvault-frontend
+  NODE_VERSION:   '20'
+
+# ─────────────────────────────────────────────────────────────────────────────
+# JOB 1 — Backend: Lint, Test & Coverage
+# ─────────────────────────────────────────────────────────────────────────────
 jobs:
-  # ─────────────────────────────────────────────────────────
-  # JOB 1: Code Quality — Lint & Test Backend
-  # ─────────────────────────────────────────────────────────
   test-backend:
     name: 🧪 Backend — Lint & Test
     runs-on: ubuntu-latest
@@ -60,130 +69,139 @@ jobs:
         ports: ['6379:6379']
 
     steps:
-      - name: ⬇️ Checkout
+      - name:  Checkout
         uses: actions/checkout@v4
 
-      - name: 🟢 Setup Node.js
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
           cache-dependency-path: backend/package-lock.json
 
-      - name: 📦 Install dependencies
+      - name: Install dependencies
         run: npm ci
 
-      - name: 🔍 Run ESLint
+      - name: Run ESLint
         run: npm run lint
 
-      - name: 🧪 Run tests with coverage
+      - name: Run tests with coverage
         run: npm run test:ci
         env:
-          NODE_ENV:       test
-          DATABASE_URL:   postgresql://test_user:test_secret@localhost:5432/finvault_test
-          REDIS_URL:      redis://localhost:6379
-          JWT_SECRET:     test_jwt_secret_minimum_32_characters_long
+          NODE_ENV:           test
+          DATABASE_URL:       postgresql://test_user:test_secret@localhost:5432/finvault_test
+          REDIS_URL:          redis://localhost:6379
+          JWT_SECRET:         test_jwt_secret_minimum_32_characters_long
           JWT_REFRESH_SECRET: test_refresh_secret_32_characters_long
 
-      - name: 📊 Upload coverage report
-        uses: codecov/codecov-action@v3
-        with:
-          flags: backend
-          directory: backend/coverage
-
-  # ─────────────────────────────────────────────────────────
-  # JOB 2: Code Quality — Lint & Test Frontend
-  # ─────────────────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────────
+  # JOB 2 — Frontend: Lint, Test
+  # ─────────────────────────────────────────────────────────────────────────
   test-frontend:
-    name: 🎨 Frontend — Lint & Test
+    name: Frontend — Lint & Test
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: frontend
 
     steps:
-      - name: ⬇️ Checkout
+      - name:  Checkout
         uses: actions/checkout@v4
 
-      - name: 🟢 Setup Node.js
+      - name:  Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
-      - name: 📦 Install dependencies
+      - name:  Install dependencies
         run: npm ci
 
-      - name: 🔍 Run ESLint
+      - name:  Run ESLint
         run: npm run lint --if-present
 
-      - name: 🧪 Run tests
+      - name:  Run tests
         run: npm run test:ci
         env:
           REACT_APP_API_URL: http://localhost:5000/api
 
-  # ─────────────────────────────────────────────────────────
-  # JOB 3: Security Scanning
-  # ─────────────────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────────
+  # JOB 3 — Security Scanning (filesystem + dependencies)
+  # ─────────────────────────────────────────────────────────────────────────
   security-scan:
-    name: 🔐 Security Scan
+    name:  Security Scan
     runs-on: ubuntu-latest
     needs: [test-backend, test-frontend]
 
     steps:
-      - name: ⬇️ Checkout
+      - name:  Checkout
         uses: actions/checkout@v4
 
-      - name: 🔐 Run Trivy vulnerability scanner (filesystem)
-        uses: aquasecurity/trivy-action@master
+      - name: Trivy — filesystem scan
+        uses: aquasecurity/trivy-action@0.20.0    # FIX: pinned version, was @master
         with:
-          scan-type:   fs
-          scan-ref:    .
-          severity:    CRITICAL,HIGH
-          exit-code:   1
+          scan-type:      fs
+          scan-ref:       .
+          severity:       CRITICAL,HIGH
+          exit-code:      1
           ignore-unfixed: true
+          format:         sarif
+          output:         trivy-fs.sarif
 
-      - name: 📋 Run npm audit — Backend
+      - name: Upload filesystem SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()                              # upload even if scan found issues
+        with:
+          sarif_file:   trivy-fs.sarif
+          category:     filesystem
+
+      - name: npm audit — Backend
         working-directory: backend
         run: npm audit --audit-level=high --production
         continue-on-error: true
 
-      - name: 📋 Run npm audit — Frontend
+      - name: npm audit — Frontend
         working-directory: frontend
         run: npm audit --audit-level=high --production
         continue-on-error: true
 
-  # ─────────────────────────────────────────────────────────
-  # JOB 4: Build & Push Docker Images
-  # ─────────────────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────────
+  # JOB 4 — Build & Push Docker Images
+  # Skipped on pull_request events — security-scan still runs on PRs.
+  # ─────────────────────────────────────────────────────────────────────────
   build-images:
-    name: 🐳 Build & Push Images
+    name: Build & Push Images
     runs-on: ubuntu-latest
     needs: [test-backend, test-frontend]
     if: github.event_name != 'pull_request'
+
     outputs:
+      image-tag:    ${{ steps.vars.outputs.image_tag }}
       backend-tag:  ${{ steps.meta-backend.outputs.tags }}
       frontend-tag: ${{ steps.meta-frontend.outputs.tags }}
       version:      ${{ steps.meta-backend.outputs.version }}
 
     steps:
-      - name: ⬇️ Checkout
+      - name:  Checkout
         uses: actions/checkout@v4
 
-      - name: 🔧 Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          platforms: linux/amd64,linux/arm64
+      # Derive a single, predictable short-SHA tag used by deploy jobs
+      - name: Set image tag
+        id: vars
+        run: echo "image_tag=sha-$(echo ${{ github.sha }} | cut -c1-7)" >> "$GITHUB_OUTPUT"
 
-      - name: 🔑 Log in to GitHub Container Registry
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
-          registry:  ${{ env.REGISTRY }}
-          username:  ${{ github.actor }}
-          password:  ${{ secrets.GITHUB_TOKEN }}
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 🏷️ Generate Backend metadata
+      - name: Generate Backend metadata
         id: meta-backend
         uses: docker/metadata-action@v5
         with:
@@ -194,7 +212,7 @@ jobs:
             type=sha,prefix=sha-,format=short
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
-      - name: 🏷️ Generate Frontend metadata
+      - name: Generate Frontend metadata
         id: meta-frontend
         uses: docker/metadata-action@v5
         with:
@@ -205,180 +223,236 @@ jobs:
             type=sha,prefix=sha-,format=short
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
-      - name: 🐳 Build & Push Backend image
+      - name: Build & Push Backend
         uses: docker/build-push-action@v5
         with:
-          context:   backend
-          file:      backend/Dockerfile
-          target:    production
-          push:      true
-          tags:      ${{ steps.meta-backend.outputs.tags }}
-          labels:    ${{ steps.meta-backend.outputs.labels }}
-          platforms: linux/amd64,linux/arm64
+          context:    backend
+          file:       backend/Dockerfile
+          target:     production
+          push:       true
+          tags:       ${{ steps.meta-backend.outputs.tags }}
+          labels:     ${{ steps.meta-backend.outputs.labels }}
+          platforms:  linux/amd64,linux/arm64
           cache-from: type=gha,scope=backend
           cache-to:   type=gha,scope=backend,mode=max
           build-args: |
             BUILD_DATE=${{ github.event.head_commit.timestamp }}
             VCS_REF=${{ github.sha }}
 
-      - name: 🐳 Build & Push Frontend image
+      - name: Build & Push Frontend
         uses: docker/build-push-action@v5
         with:
-          context:   frontend
-          file:      frontend/Dockerfile
-          target:    production
-          push:      true
-          tags:      ${{ steps.meta-frontend.outputs.tags }}
-          labels:    ${{ steps.meta-frontend.outputs.labels }}
-          platforms: linux/amd64,linux/arm64
+          context:    frontend
+          file:       frontend/Dockerfile
+          target:     production
+          push:       true
+          tags:       ${{ steps.meta-frontend.outputs.tags }}
+          labels:     ${{ steps.meta-frontend.outputs.labels }}
+          platforms:  linux/amd64,linux/arm64
           cache-from: type=gha,scope=frontend
           cache-to:   type=gha,scope=frontend,mode=max
+          # FIX: REACT_APP_API_URL injected at runtime via K8s env, NOT baked in at build time.
+          # This lets one image serve both staging and production.
           build-args: |
-            REACT_APP_API_URL=${{ vars.REACT_APP_API_URL }}
             REACT_APP_ENV=production
+            VCS_REF=${{ github.sha }}
 
-      - name: 🔐 Scan Backend image with Trivy
-        uses: aquasecurity/trivy-action@master
+      # FIX: scan the exact SHA-tagged image that was just pushed, not :latest
+      - name:  Trivy — scan Backend image
+        uses: aquasecurity/trivy-action@0.20.0    # FIX: pinned version
         with:
-          image-ref:  ${{ env.IMAGE_BACKEND }}:latest
-          format:     sarif
-          output:     trivy-backend.sarif
-          severity:   CRITICAL,HIGH
+          image-ref: ${{ env.IMAGE_BACKEND }}:${{ steps.vars.outputs.image_tag }}
+          format:    sarif
+          output:    trivy-backend.sarif
+          severity:  CRITICAL,HIGH
 
-      - name: 📤 Upload Trivy scan results
+      - name:  Upload Backend image SARIF
         uses: github/codeql-action/upload-sarif@v3
+        if: always()
         with:
           sarif_file: trivy-backend.sarif
+          category:   backend-image
 
-  # ─────────────────────────────────────────────────────────
-  # JOB 5: Deploy to Staging
-  # ─────────────────────────────────────────────────────────
+      - name: Trivy — scan Frontend image
+        uses: aquasecurity/trivy-action@0.20.0
+        with:
+          image-ref: ${{ env.IMAGE_FRONTEND }}:${{ steps.vars.outputs.image_tag }}
+          format:    sarif
+          output:    trivy-frontend.sarif
+          severity:  CRITICAL,HIGH
+
+      - name:  Upload Frontend image SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-frontend.sarif
+          category:   frontend-image
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # JOB 5 — Deploy to Staging  (develop branch only)
+  # FIX: added needs.build-images.result check — build-images is skipped on PRs,
+  # so without this check the deploy would hang waiting on a skipped job.
+  # ─────────────────────────────────────────────────────────────────────────
   deploy-staging:
-    name: 🚀 Deploy → Staging
+    name: Deploy → Staging
     runs-on: ubuntu-latest
     needs: [build-images, security-scan]
-    if: github.ref == 'refs/heads/develop'
+    if: |
+      github.ref == 'refs/heads/develop' &&
+      needs.build-images.result == 'success' &&
+      needs.security-scan.result == 'success'
     environment:
       name: staging
-      url:  https://staging.finvault.yourdomain.com
+      url:  ${{ vars.STAGING_URL }}           # FIX: no hardcoded domain
 
     steps:
-      - name: ⬇️ Checkout
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: ☸️ Set up kubectl
+      - name: Set up kubectl
         uses: azure/setup-kubectl@v3
         with:
           version: v1.29.0
 
-      - name: 🔑 Configure kubeconfig
+      - name: Configure kubeconfig
         run: |
           mkdir -p ~/.kube
           echo "${{ secrets.KUBE_CONFIG_STAGING }}" | base64 -d > ~/.kube/config
           chmod 600 ~/.kube/config
 
-      - name: ☸️ Deploy to staging namespace
+      - name: Deploy to staging namespace
+        env:
+          IMAGE_TAG: ${{ needs.build-images.outputs.image-tag }}  # FIX: use job output, not re-derive
         run: |
-          export IMAGE_TAG=sha-$(echo ${{ github.sha }} | cut -c1-7)
-
-          # Patch image tags
           kubectl set image deployment/backend  backend=${{ env.IMAGE_BACKEND }}:$IMAGE_TAG  -n finvault-staging
           kubectl set image deployment/frontend frontend=${{ env.IMAGE_FRONTEND }}:$IMAGE_TAG -n finvault-staging
 
-          # Wait for rollout
           kubectl rollout status deployment/backend  -n finvault-staging --timeout=300s
           kubectl rollout status deployment/frontend -n finvault-staging --timeout=300s
 
-      - name: 🧪 Run smoke tests
+      # FIX: retry loop instead of blind sleep — more reliable, faster on success
+      - name: Smoke test — staging
         run: |
-          sleep 15
-          curl -f https://staging.finvault.yourdomain.com/api/health || exit 1
+          echo "Running smoke test against ${{ vars.STAGING_URL }}"
+          for i in {1..10}; do
+            curl -sf ${{ vars.STAGING_URL }}/api/health && echo "✅ Health check passed" && exit 0
+            echo "Attempt $i failed, retrying in 5s..."
+            sleep 5
+          done
+          echo "Smoke test failed after 10 attempts"
+          exit 1
 
-      - name: 📣 Notify Slack on success
-        if: success()
+      - name: Rollback staging on failure
+        if: failure()
+        run: |
+          echo "Deployment failed — rolling back staging..."
+          kubectl rollout undo deployment/backend  -n finvault-staging
+          kubectl rollout undo deployment/frontend -n finvault-staging
+          kubectl rollout status deployment/backend  -n finvault-staging --timeout=120s
+          kubectl rollout status deployment/frontend -n finvault-staging --timeout=120s # FIX: was missing
+
+      - name: Slack — staging result
+        if: always()
         uses: slackapi/slack-github-action@v1.25.0
         with:
           payload: |
-            {"text": "✅ *FinVault* staging deploy successful — `${{ github.sha }}` by @${{ github.actor }}"}
+            {
+              "text": "${{ job.status == 'success' && '✅' || '❌' }} *FinVault Staging* deploy `${{ job.status }}` — `${{ needs.build-images.outputs.image-tag }}` by @${{ github.actor }}"
+            }
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
 
-  # ─────────────────────────────────────────────────────────
-  # JOB 6: Deploy to Production (with approval gate)
-  # ─────────────────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────────
+  # JOB 6 — Deploy to Production  (main branch only, requires approval gate)
+  # The GitHub environment "production" should have required reviewers configured
+  # in Settings → Environments to enforce the manual approval gate.
+  # ─────────────────────────────────────────────────────────────────────────
   deploy-production:
-    name: 🚀 Deploy → Production
+    name: Deploy → Production
     runs-on: ubuntu-latest
     needs: [build-images, security-scan]
-    if: github.ref == 'refs/heads/main'
+    if: |
+      github.ref == 'refs/heads/main' &&
+      needs.build-images.result == 'success' &&
+      needs.security-scan.result == 'success'
     environment:
       name: production
-      url:  https://finvault.yourdomain.com
+      url:  ${{ vars.PRODUCTION_URL }}        # FIX: no hardcoded domain
 
     steps:
-      - name: ⬇️ Checkout
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: ☸️ Set up kubectl
+      - name: Set up kubectl
         uses: azure/setup-kubectl@v3
         with:
           version: v1.29.0
 
-      - name: 🔑 Configure kubeconfig
+      - name:  Configure kubeconfig
         run: |
           mkdir -p ~/.kube
           echo "${{ secrets.KUBE_CONFIG_PROD }}" | base64 -d > ~/.kube/config
           chmod 600 ~/.kube/config
 
-      - name: ☸️ Apply K8s manifests
-        run: |
-          kubectl apply -f k8s/ --namespace=finvault
+      - name:  Apply K8s manifests
+        run: kubectl apply -f k8s/ --namespace=finvault
 
-      - name: 🐳 Update image tags — rolling deploy
+      - name:  Rolling deploy — update image tags
+        env:
+          IMAGE_TAG: ${{ needs.build-images.outputs.image-tag }}  # FIX: from job output
         run: |
-          export IMAGE_TAG=sha-$(echo ${{ github.sha }} | cut -c1-7)
           kubectl set image deployment/backend  backend=${{ env.IMAGE_BACKEND }}:$IMAGE_TAG  -n finvault
           kubectl set image deployment/frontend frontend=${{ env.IMAGE_FRONTEND }}:$IMAGE_TAG -n finvault
 
-      - name: ⏳ Wait for rollout
+      - name:  Wait for rollout
         run: |
           kubectl rollout status deployment/backend  -n finvault --timeout=300s
           kubectl rollout status deployment/frontend -n finvault --timeout=300s
 
-      - name: 🧪 Production smoke test
+      # FIX: retry loop, no hardcoded domain, removed blind sleep
+      - name:  Smoke test — production
         run: |
-          sleep 20
-          curl -f https://finvault.yourdomain.com/api/health || exit 1
-          echo "✅ Production health check passed"
+          echo "Running smoke test against ${{ vars.PRODUCTION_URL }}"
+          for i in {1..12}; do
+            curl -sf ${{ vars.PRODUCTION_URL }}/api/health && echo "✅ Production health check passed" && exit 0
+            echo "Attempt $i failed, retrying in 5s..."
+            sleep 5
+          done
+          echo " Production smoke test failed after 12 attempts"
+          exit 1
 
+      # FIX: was actions/create-release@v1 (deprecated, buggy on re-runs)
       - name: 🏷️ Create GitHub Release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v2
         with:
-          tag_name:     v${{ github.run_number }}
-          release_name: "Release v${{ github.run_number }}"
+          tag_name:   v${{ github.run_number }}
+          name:       "Release v${{ github.run_number }}"
           body: |
-            ## 🚀 FinVault v${{ github.run_number }}
-            **Deployed:** ${{ github.event.head_commit.timestamp }}
-            **Commit:**   ${{ github.sha }}
-            **Author:**   ${{ github.actor }}
-          draft: false
+            ##  FinVault v${{ github.run_number }}
+            **Deployed:**  ${{ github.event.head_commit.timestamp }}
+            **Commit:**    ${{ github.sha }}
+            **Image tag:** ${{ needs.build-images.outputs.image-tag }}
+            **Author:**    ${{ github.actor }}
+          draft:      false
           prerelease: false
 
-      - name: ⏮️ Rollback on failure
+      # FIX: rollback now waits on BOTH deployments, not just backend
+      - name: Rollback production on failure
         if: failure()
         run: |
-          echo "Deployment failed — rolling back..."
+          echo "Deployment failed — rolling back production..."
           kubectl rollout undo deployment/backend  -n finvault
           kubectl rollout undo deployment/frontend -n finvault
           kubectl rollout status deployment/backend  -n finvault --timeout=120s
+          kubectl rollout status deployment/frontend -n finvault --timeout=120s  # FIX: was missing
 
-      - name: 📣 Notify Slack
+      - name: 📣 Slack — production result
         if: always()
         uses: slackapi/slack-github-action@v1.25.0
         with:
           payload: |
-            {"text": "${{ job.status == 'success' && '✅' || '❌' }} *FinVault Production* deploy `${{ job.status }}` — `${{ github.sha }}`"}
+            {
+              "text": "${{ job.status == 'success' && '✅' || '❌' }} *FinVault Production* deploy `${{ job.status }}` — `${{ needs.build-images.outputs.image-tag }}` by @${{ github.actor }}"
+            }
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
