@@ -144,17 +144,28 @@ jobs:
           scan-type:      fs
           scan-ref:       .
           severity:       CRITICAL,HIGH
-          exit-code:      1
+          exit-code:      '0'
           ignore-unfixed: true
           format:         sarif
           output:         trivy-fs.sarif
 
       - name: Upload filesystem SARIF
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()                              # upload even if scan found issues
         with:
           sarif_file:   trivy-fs.sarif
           category:     filesystem
+
+      - name: Trivy — filesystem enforce
+        uses: aquasecurity/trivy-action@v0.33.1
+        with:
+          scan-type:        fs
+          scan-ref:         .
+          severity:         CRITICAL,HIGH
+          exit-code:        '1'
+          ignore-unfixed:   true
+          format:           table
+          skip-setup-trivy: true
 
       - name: npm audit — Backend
         working-directory: backend
@@ -267,7 +278,7 @@ jobs:
           severity:  CRITICAL,HIGH
 
       - name:  Upload Backend image SARIF
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: trivy-backend.sarif
@@ -282,7 +293,7 @@ jobs:
           severity:  CRITICAL,HIGH
 
       - name:  Upload Frontend image SARIF
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: trivy-frontend.sarif
