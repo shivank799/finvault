@@ -36,6 +36,8 @@ async function connectDB() {
 async function runMigrations(client) {
   // Create tables if they don't exist (idempotent migrations)
   await client.query(`
+    CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
     CREATE TABLE IF NOT EXISTS users (
       id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       name          VARCHAR(100) NOT NULL,

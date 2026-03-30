@@ -92,8 +92,10 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        REACT_APP_API_URL: ${REACT_APP_API_URL:-http://localhost:5000/api}
+        REACT_APP_API_URL: ${REACT_APP_API_URL:-/api}
         REACT_APP_ENV: production
+        REACT_APP_SUPABASE_URL: ${REACT_APP_SUPABASE_URL}
+        REACT_APP_SUPABASE_PUBLISHABLE_DEFAULT_KEY: ${REACT_APP_SUPABASE_PUBLISHABLE_DEFAULT_KEY}
     container_name: finvault_frontend
     restart: unless-stopped
     depends_on:

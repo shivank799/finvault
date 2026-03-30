@@ -6,6 +6,7 @@ import { Toaster } from 'react-hot-toast';
 
 import useAuthStore from './context/authStore';
 import Layout       from './components/Layout';
+import SupabaseSessionProvider from './components/SupabaseSessionProvider';
 import LoginPage    from './pages/LoginPage';
 import Dashboard    from './pages/Dashboard';
 import Transactions from './pages/Transactions';
@@ -45,21 +46,23 @@ function PublicRoute({ children }) {
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
-          <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
-            <Route index                element={<Dashboard />} />
-            <Route path="transactions"  element={<Transactions />} />
-            <Route path="add"           element={<AddRecord />} />
-            <Route path="budgets"       element={<BudgetPage />} />
-            <Route path="goals"         element={<GoalsPage />} />
-            <Route path="reports"       element={<ReportsPage />} />
-            <Route path="settings"      element={<SettingsPage />} />
-          </Route>
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </BrowserRouter>
+      <SupabaseSessionProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
+            <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
+              <Route index                element={<Dashboard />} />
+              <Route path="transactions"  element={<Transactions />} />
+              <Route path="add"           element={<AddRecord />} />
+              <Route path="budgets"       element={<BudgetPage />} />
+              <Route path="goals"         element={<GoalsPage />} />
+              <Route path="reports"       element={<ReportsPage />} />
+              <Route path="settings"      element={<SettingsPage />} />
+            </Route>
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </BrowserRouter>
+      </SupabaseSessionProvider>
       <Toaster
         position="bottom-right"
         toastOptions={{

@@ -1,0 +1,10 @@
+apiVersion: 1
+
+providers:
+  - name: FinVault Dashboards
+    folder: FinVault
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /etc/grafana/provisioning/dashboards/json

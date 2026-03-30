@@ -1,6 +1,6 @@
 'use strict';
 
-require('dotenv').config();
+require('./loadEnv');
 require('express-async-errors');
 
 const express      = require('express');
@@ -17,6 +17,7 @@ const logger          = require('./utils/logger');
 const { connectDB }   = require('./config/database');
 const { connectRedis} = require('./config/redis');
 const metricsMiddleware = require('./middleware/metrics');
+const { attachSupabaseSession } = require('./middleware/supabaseSession');
 const errorHandler    = require('./middleware/errorHandler');
 const authRoutes      = require('./routes/auth');
 const userRoutes      = require('./routes/users');
@@ -89,6 +90,9 @@ app.use((req, _res, next) => {
   req.id = req.headers['x-request-id'] || require('uuid').v4();
   next();
 });
+
+// Add a request-scoped Supabase client without changing the existing JWT auth flow.
+app.use(attachSupabaseSession);
 
 // ─── Routes ──────────────────────────────────────────────────────
 app.get('/api/health', async (_req, res) => {

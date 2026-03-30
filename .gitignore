@@ -18,10 +18,23 @@ dist/
 # Logs
 logs/
 *.log
+backend/logs/
+backend/logs/.*
+backend/logs/*-audit.json
 
 # Coverage
 coverage/
 .nyc_output/
+backend/coverage/
+frontend/coverage/
+
+# Frontend build artifacts
+frontend/build/
+
+# Local app env overrides
+backend/.env
+frontend/.env
+frontend/.env.local
 
 # OS
 .DS_Store

@@ -1,32 +1,61 @@
-const Redis  = require('ioredis');
+const Redis = require('ioredis');
 const logger = require('../utils/logger');
 
 let client;
 
+function getRedisOptions() {
+  const redisUrl = process.env.REDIS_URL;
+
+  if (!redisUrl) {
+    throw new Error('REDIS_URL is not configured');
+  }
+
+  let parsedUrl;
+
+  try {
+    parsedUrl = new URL(redisUrl);
+  } catch (error) {
+    throw new Error(`Invalid REDIS_URL: ${error.message}`);
+  }
+
+  const isTlsConnection =
+    parsedUrl.protocol === 'rediss:' || parsedUrl.hostname.endsWith('.upstash.io');
+
+  return {
+    maxRetriesPerRequest: 3,
+    lazyConnect: false,
+    retryStrategy: (times) => {
+      if (times > 5) return null;
+      return Math.min(times * 200, 2000);
+    },
+    reconnectOnError: (err) => {
+      const targetErrors = ['READONLY', 'ECONNRESET'];
+      return targetErrors.some((code) => err.message.includes(code));
+    },
+    ...(isTlsConnection ? { tls: {} } : {}),
+  };
+}
+
 function connectRedis() {
   return new Promise((resolve, reject) => {
-    client = new Redis(process.env.REDIS_URL, {
-      maxRetriesPerRequest: 3,
-      lazyConnect: false,
-      retryStrategy: (times) => {
-        if (times > 5) return null;
-        return Math.min(times * 200, 2000);
-      },
-      reconnectOnError: (err) => {
-        const targetErrors = ['READONLY', 'ECONNRESET'];
-        return targetErrors.some(e => err.message.includes(e));
-      },
-    });
+    try {
+      client = new Redis(process.env.REDIS_URL, getRedisOptions());
+    } catch (error) {
+      reject(error);
+      return;
+    }
 
-    client.on('connect',      () => logger.info('✅ Redis connected'));
-    client.on('ready',        () => resolve(client));
-    client.on('error',        (err) => logger.error('Redis error:', err.message));
+    client.on('connect', () => logger.info('Redis socket connected'));
+    client.on('ready', () => {
+      logger.info('Redis client ready');
+      resolve(client);
+    });
+    client.on('error', (err) => logger.error(`Redis error: ${err.message}`));
     client.on('reconnecting', () => logger.warn('Redis reconnecting...'));
-    client.on('end',          () => logger.warn('Redis connection ended'));
+    client.on('end', () => logger.warn('Redis connection ended'));
   });
 }
 
-// Typed helpers
 const cache = {
   async get(key) {
     const data = await client.get(key);
@@ -53,4 +82,8 @@ const cache = {
   },
 };
 
-module.exports = { connectRedis, client: new Proxy({}, { get: (_, prop) => client?.[prop]?.bind(client) }), cache };
+module.exports = {
+  connectRedis,
+  client: new Proxy({}, { get: (_, prop) => client?.[prop]?.bind(client) }),
+  cache,
+};
